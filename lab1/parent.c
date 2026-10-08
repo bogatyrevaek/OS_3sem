@@ -21,7 +21,7 @@ static ssize_t read_line(int fd, char *buf, size_t maxlen) {
             if (i == 0) return -1;
             break;
         }
-        if (n == 0) { // EOF
+        if (n == 0) {
             if (i == 0) return 0;
             break;
         }
@@ -38,11 +38,19 @@ static void put_int(int fd, int v) {
     if (v == 0) {
         buf[pos++] = '0';
     } else {
-        if (v < 0) { buf[pos++] = '-'; v = -v; }
+        if (v < 0) {
+            buf[pos++] = '-';
+            v = -v;
+        }
         char tmp[16];
         int t = 0;
-        while (v > 0) { tmp[t++] = (char)('0' + (v % 10)); v /= 10; }
-        while (t > 0) buf[pos++] = tmp[--t];
+        while (v > 0) {
+            tmp[t++] = (char)('0' + (v % 10));
+            v /= 10;
+        }
+        while (t > 0) {
+            buf[pos++] = tmp[--t];
+        }
     }
     write(fd, buf, (size_t)pos);
 }
