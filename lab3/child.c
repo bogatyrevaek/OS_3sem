@@ -23,16 +23,20 @@ static void cleanup(void) {
     if (shm_fd >= 0) { close(shm_fd); shm_fd = -1; }
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Error: file name argument required\n");
+        return EXIT_FAILURE;
+    }
+
     shm_fd = shm_open(SHM_NAME, O_RDWR, 0);
     if (shm_fd < 0) die("shm_open (child)");
 
-    shm = mmap(NULL, sizeof(shared_t),
-               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    shm = mmap(NULL, sizeof(shared_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shm == MAP_FAILED) die("mmap (child)");
 
-    out_fp = fopen("result.txt", "w");
-    if (!out_fp) die("fopen result.txt");
+    out_fp = fopen(argv[1], "w");
+    if (!out_fp) die("fopen result file");
 
     double sum = 0.0;
     int have_numbers = 0;
@@ -56,8 +60,6 @@ int main(void) {
         if (s.is_eol) {
             if (have_numbers)
                 fprintf(out_fp, "%.10g\n", sum);
-            else
-                fprintf(out_fp, "(empty line)\n");
             fflush(out_fp);
             sum = 0.0;
             have_numbers = 0;
