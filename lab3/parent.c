@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <semaphore.h>
 #include "common.h"
 
 static shared_t *shm = NULL;
@@ -28,15 +29,15 @@ static void cleanup(void) {
 }
 
 static void push(double v, int is_eol) {
-    pthread_mutex_lock(&shm->mtx);
-    while ((shm->tail + 1) % SLOT_COUNT == shm->head) {
-        pthread_cond_wait(&shm->not_full, &shm->mtx);
-    }
+    sem_wait(&shm->empty);
+    sem_wait(&shm->mutex);
+
     shm->slots[shm->tail].value  = v;
     shm->slots[shm->tail].is_eol = is_eol;
     shm->tail = (shm->tail + 1) % SLOT_COUNT;
-    pthread_cond_signal(&shm->not_empty);
-    pthread_mutex_unlock(&shm->mtx);
+
+    sem_post(&shm->mutex);
+    sem_post(&shm->full);
 }
 
 int main(int argc, char *argv[]) {
@@ -53,17 +54,9 @@ int main(int argc, char *argv[]) {
                PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shm == MAP_FAILED) die("mmap");
 
-    pthread_mutexattr_t ma;
-    pthread_condattr_t  ca;
-    pthread_mutexattr_init(&ma);
-    pthread_condattr_init(&ca);
-    pthread_mutexattr_setpshared(&ma, PTHREAD_PROCESS_SHARED);
-    pthread_condattr_setpshared(&ca, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(&shm->mtx, &ma);
-    pthread_cond_init(&shm->not_empty, &ca);
-    pthread_cond_init(&shm->not_full,  &ca);
-    pthread_mutexattr_destroy(&ma);
-    pthread_condattr_destroy(&ca);
+    if (sem_init(&shm->mutex, 1, 1) < 0) die("sem_init mutex");
+    if (sem_init(&shm->empty, 1, SLOT_COUNT) < 0) die("sem_init empty");
+    if (sem_init(&shm->full,  1, 0) < 0) die("sem_init full");
 
     shm->head = shm->tail = 0;
     shm->finished_flag = 0;
@@ -102,11 +95,7 @@ int main(int argc, char *argv[]) {
     }
     free(line);
 
-    pthread_mutex_lock(&shm->mtx);
-    shm->finished_flag = 1;
-    pthread_cond_broadcast(&shm->not_empty);
-    pthread_cond_broadcast(&shm->not_full);
-    pthread_mutex_unlock(&shm->mtx);
+    push(0.0, 1);
 
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) die("waitpid");
@@ -116,9 +105,9 @@ int main(int argc, char *argv[]) {
     else if (WIFSIGNALED(status))
         printf("[parent] child killed by signal %d\n", WTERMSIG(status));
 
-    pthread_mutex_destroy(&shm->mtx);
-    pthread_cond_destroy(&shm->not_empty);
-    pthread_cond_destroy(&shm->not_full);
+    sem_destroy(&shm->mutex);
+    sem_destroy(&shm->empty);
+    sem_destroy(&shm->full);
 
     cleanup();
     return EXIT_SUCCESS;
