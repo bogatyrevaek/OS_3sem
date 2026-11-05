@@ -40,9 +40,35 @@ static void push(double v, int is_eol) {
     sem_post(&shm->full);
 }
 
+static void push_final(void) {
+    sem_wait(&shm->empty);
+    sem_wait(&shm->mutex);
+
+    shm->slots[shm->tail].value  = 0.0;
+    shm->slots[shm->tail].is_eol = 1;
+    shm->tail = (shm->tail + 1) % SLOT_COUNT;
+    shm->finished_flag = 1;
+
+    sem_post(&shm->mutex);
+    sem_post(&shm->full);
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <child_binary>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    char fileName[1024];
+    printf("Enter output file name: ");
+    if (fgets(fileName, sizeof(fileName), stdin) == NULL) {
+        fprintf(stderr, "Error reading file name\n");
+        return EXIT_FAILURE;
+    }
+    size_t len = strlen(fileName);
+    if (len > 0 && fileName[len - 1] == '\n') fileName[len - 1] = '\0';
+    if (strlen(fileName) == 0) {
+        fprintf(stderr, "Empty file name\n");
         return EXIT_FAILURE;
     }
 
@@ -50,8 +76,7 @@ int main(int argc, char *argv[]) {
     if (shm_fd < 0) die("shm_open");
     if (ftruncate(shm_fd, sizeof(shared_t)) < 0) die("ftruncate");
 
-    shm = mmap(NULL, sizeof(shared_t),
-               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    shm = mmap(NULL, sizeof(shared_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shm == MAP_FAILED) die("mmap");
 
     if (sem_init(&shm->mutex, 1, 1) < 0) die("sem_init mutex");
@@ -65,16 +90,17 @@ int main(int argc, char *argv[]) {
     if (pid < 0) die("fork");
     if (pid == 0) {
         close(shm_fd);
-        execl(argv[1], argv[1], (char *)NULL);
+        execl(argv[1], argv[1], fileName, (char *)NULL);
         perror("execl");
         _exit(127);
     }
 
     char *line = NULL;
     size_t cap = 0;
-    ssize_t len;
+    ssize_t bytes_read;
 
-    while ((len = getline(&line, &cap, stdin)) > 0) {
+    printf("Enter numbers (Ctrl+D to exit):\n");
+    while ((bytes_read = getline(&line, &cap, stdin)) > 0) {
         char *p = line;
         while (*p) {
             while (*p == ' ' || *p == '\t' || *p == '\r') p++;
@@ -95,7 +121,7 @@ int main(int argc, char *argv[]) {
     }
     free(line);
 
-    push(0.0, 1);
+    push_final();
 
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) die("waitpid");
