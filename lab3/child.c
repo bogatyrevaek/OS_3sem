@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <semaphore.h>
 #include "common.h"
 
 static shared_t *shm = NULL;
@@ -37,20 +38,20 @@ int main(void) {
     int have_numbers = 0;
 
     for (;;) {
-        pthread_mutex_lock(&shm->mtx);
-
-        while (shm->head == shm->tail && !shm->finished_flag) {
-            pthread_cond_wait(&shm->not_empty, &shm->mtx);
-        }
-        if (shm->head == shm->tail && shm->finished_flag) {
-            pthread_mutex_unlock(&shm->mtx);
-            break;
-        }
+        sem_wait(&shm->full);
+        sem_wait(&shm->mutex);
 
         slot_t s = shm->slots[shm->head];
         shm->head = (shm->head + 1) % SLOT_COUNT;
-        pthread_cond_signal(&shm->not_full);
-        pthread_mutex_unlock(&shm->mtx);
+
+        if (s.is_eol && shm->finished_flag && (shm->head == shm->tail)) {
+            sem_post(&shm->mutex);
+            sem_post(&shm->empty);
+            break;
+        }
+
+        sem_post(&shm->mutex);
+        sem_post(&shm->empty);
 
         if (s.is_eol) {
             if (have_numbers)
